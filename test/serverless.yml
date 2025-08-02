@@ -1,0 +1,25 @@
+service: loan-eligibility-engine
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: ap-south-1
+
+functions:
+  getPresignedUrl:
+    handler: handler.get_presigned_url
+    events:
+      - http:
+          path: presign
+          method: get
+          cors: true
+
+  processCsv:
+    handler: handler.process_csv
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: true

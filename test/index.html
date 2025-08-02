@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loan CSV Upload</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2rem;
+        }
+
+        .required-fields {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+
+        .required-fields h3 {
+            color: #495057;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .required-fields ul {
+            list-style: none;
+            color: #6c757d;
+        }
+
+        .required-fields li {
+            padding: 5px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .required-fields li:last-child {
+            border-bottom: none;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 10px;
+            padding: 40px 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: #5a6fd8;
+            background: #f8f9ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #4c63d2;
+            background: #e8ecff;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .upload-text {
+            color: #495057;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+        }
+
+        .file-info {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        .selected-file {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #c3e6cb;
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .upload-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            margin: 20px 0;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Loan Application CSV Upload</h1>
+        
+        <div class="required-fields">
+            <h3>Required CSV Columns</h3>
+            <ul>
+                <li><strong>user_id</strong> - Unique identifier</li>
+                <li><strong>name</strong> - Full name</li>
+                <li><strong>email</strong> - Email address</li>
+                <li><strong>monthly_income</strong> - Monthly income amount</li>
+                <li><strong>credit_score</strong> - Credit score value</li>
+                <li><strong>employment_status</strong> - Self-Employed, Business, or Salaried</li>
+                <li><strong>age</strong> - Age in years</li>
+            </ul>
+        </div>
+
+        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">Click to select CSV file or drag and drop</div>
+            <div class="file-info">Only .csv files are accepted</div>
+        </div>
+
+        <input type="file" id="fileInput" accept=".csv" />
+
+        <div id="selectedFile" class="selected-file" style="display: none;"></div>
+
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <button class="upload-btn" id="uploadBtn" disabled onclick="uploadFile()">
+            Upload CSV File
+        </button>
+
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = 'https://47qut4wyvd.execute-api.ap-south-1.amazonaws.com/dev/presign';
+        let selectedFile = null;
+
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            handleFileSelect(e.target.files[0]);
+        });
+
+        // Drag and drop handlers
+        const uploadArea = document.querySelector('.upload-area');
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            if (!file) return;
+
+            // Validate file type
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                showMessage('Please select a CSV file only.', 'error');
+                return;
+            }
+
+            selectedFile = file;
+            document.getElementById('selectedFile').style.display = 'block';
+            document.getElementById('selectedFile').innerHTML = `
+                <strong>Selected File:</strong> ${file.name}<br>
+                <strong>Size:</strong> ${(file.size / 1024).toFixed(2)} KB
+            `;
+            document.getElementById('uploadBtn').disabled = false;
+            hideMessage();
+        }
+
+        async function uploadFile() {
+            if (!selectedFile) {
+                showMessage('Please select a file first.', 'error');
+                return;
+            }
+
+            try {
+                document.getElementById('uploadBtn').disabled = true;
+                document.getElementById('uploadBtn').textContent = 'Getting Upload URL...';
+                
+                // Step 1: Get presigned URL
+                const response = await fetch(`${API_ENDPOINT}?filename=${encodeURIComponent(selectedFile.name)}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to get upload URL');
+                }
+
+                const data = await response.json();
+                const presignedUrl = data.presignedUrl;
+
+                // Step 2: Show progress bar
+                document.getElementById('progressBar').style.display = 'block';
+                document.getElementById('uploadBtn').textContent = 'Uploading...';
+
+                // Step 3: Upload file to S3
+                const uploadResponse = await fetch(presignedUrl, {
+                    method: 'PUT',
+                    body: selectedFile,
+                    headers: {
+                        'Content-Type': 'text/csv'
+                    }
+                });
+
+                // Simulate progress
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += 10;
+                    document.getElementById('progressFill').style.width = progress + '%';
+                    if (progress >= 100) {
+                        clearInterval(progressInterval);
+                    }
+                }, 100);
+
+                if (uploadResponse.ok) {
+                    setTimeout(() => {
+                        showMessage('✅ File uploaded successfully! CSV data is being processed.', 'success');
+                        resetForm();
+                    }, 1200);
+                } else {
+                    throw new Error('Upload failed');
+                }
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                showMessage('❌ Upload failed. Please try again.', 'error');
+                resetForm();
+            }
+        }
+
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${type}`;
+            messageDiv.style.display = 'block';
+        }
+
+        function hideMessage() {
+            document.getElementById('message').style.display = 'none';
+        }
+
+        function resetForm() {
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('uploadBtn').textContent = 'Upload CSV File';
+            document.getElementById('progressBar').style.display = 'none';
+            document.getElementById('progressFill').style.width = '0%';
+            selectedFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('selectedFile').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

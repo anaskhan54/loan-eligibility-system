@@ -1,0 +1,4 @@
+.serverless/
+test/node_modules
+test/.claude
+package-lock.json
