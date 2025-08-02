@@ -4,6 +4,13 @@ provider:
   name: aws
   runtime: python3.9
   region: ap-south-1
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:GetObject
+      Resource:
+        - arn:aws:s3:::loan-user-uploads/uploads/*
 
 functions:
   getPresignedUrl:

@@ -92,7 +92,7 @@ def process_csv(event, context):
                         employment_status = 'salaried'
                     
                     cur.execute(
-                        "INSERT INTO loan_applications (user_id, name, email, monthly_income, credit_score, employment_status, age, filename, upload_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)",
+                        "INSERT INTO users (user_id, name, email, monthly_income, credit_score, employment_status, age, filename, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                         (user_id, name, email, monthly_income, credit_score, employment_status, age, key, 'processed')
                     )
             
