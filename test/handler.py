@@ -44,6 +44,7 @@ def get_presigned_url(event, context):
 
 
 def process_csv(event, context):
+    print(f"Processing CSV - Event: {json.dumps(event)}")
     s3_client = boto3.client('s3')
     
     # Hardcoded database configuration
@@ -58,9 +59,11 @@ def process_csv(event, context):
         for record in event['Records']:
             bucket = record['s3']['bucket']['name']
             key = record['s3']['object']['key']
+            print(f"Processing file: {key} from bucket: {bucket}")
             
             response = s3_client.get_object(Bucket=bucket, Key=key)
             csv_content = response['Body'].read().decode('utf-8')
+            print(f"CSV content length: {len(csv_content)}")
             
             conn = psycopg2.connect(
                 host=DB_CONFIG['host'],
@@ -68,12 +71,21 @@ def process_csv(event, context):
                 user=DB_CONFIG['user'],
                 password=DB_CONFIG['password']
             )
+            print("Database connection established")
             
             cur = conn.cursor()
             
             lines = csv_content.strip().split('\n')
-            for line in lines[1:]:
+            print(f"Total lines in CSV: {len(lines)}")
+            
+            # Prepare batch data with deduplication
+            seen_emails = set()
+            batch_data = []
+            duplicates_in_csv = 0
+            
+            for line in lines[1:]:  # Skip header
                 values = line.split(',')
+                
                 if len(values) >= 7:
                     user_id = values[0].strip()
                     name = values[1].strip()
@@ -91,14 +103,56 @@ def process_csv(event, context):
                     elif employment_status == 'Salaried':
                         employment_status = 'salaried'
                     
-                    cur.execute(
-                        "INSERT INTO users (user_id, name, email, monthly_income, credit_score, employment_status, age, filename, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (user_id, name, email, monthly_income, credit_score, employment_status, age, key, 'processed')
-                    )
+                    # Check for duplicates within CSV
+                    if email in seen_emails:
+                        print(f"Skipping duplicate email in CSV: {email}")
+                        duplicates_in_csv += 1
+                        continue
+                    
+                    seen_emails.add(email)
+                    batch_data.append((user_id, name, email, monthly_income, credit_score, employment_status, age))
+                else:
+                    print(f"Skipping line with insufficient data: {line}")
             
-            conn.commit()
+            print(f"Prepared {len(batch_data)} unique records for batch insert (skipped {duplicates_in_csv} duplicates within CSV)")
+            
+            # Use ON CONFLICT to ignore duplicates
+            insert_query = """
+                INSERT INTO users (user_id, name, email, monthly_income, credit_score, employment_status, age) 
+                VALUES %s 
+                ON CONFLICT (email) DO NOTHING
+            """
+            
+            try:
+                from psycopg2.extras import execute_values
+                cur.execute("BEGIN")
+                execute_values(cur, insert_query, batch_data, template=None, page_size=1000)
+                cur.execute("SELECT ROW_COUNT()")
+                records_inserted = cur.fetchone()[0] if cur.rowcount > 0 else len(batch_data)
+                cur.execute("COMMIT")
+                print(f"Batch insert completed. Records processed: {len(batch_data)}")
+            except Exception as e:
+                cur.execute("ROLLBACK")
+                print(f"Batch insert failed, falling back to individual inserts: {str(e)}")
+                
+                # Fallback to individual inserts
+                records_inserted = 0
+                for data in batch_data:
+                    try:
+                        cur.execute(
+                            "INSERT INTO users (user_id, name, email, monthly_income, credit_score, employment_status, age) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (email) DO NOTHING",
+                            data
+                        )
+                        if cur.rowcount > 0:
+                            records_inserted += 1
+                    except Exception as individual_error:
+                        print(f"Skipping record {data[0]}: {str(individual_error)}")
+                        continue
+                
+                conn.commit()
             cur.close()
             conn.close()
+            print(f"Successfully inserted {records_inserted} records to database")
             
             # Call webhook after processing
             webhook_url = "https://httpbin.org/post"  # Sample webhook - replace with your actual webhook
@@ -106,13 +160,14 @@ def process_csv(event, context):
                 "message": "CSV processed successfully",
                 "filename": key,
                 "processed_at": "now",
-                "records_processed": len(lines) - 1
+                "records_processed": records_inserted
             }
             
             try:
-                requests.post(webhook_url, json=webhook_data, timeout=10)
-            except:
-                pass  # Don't fail the Lambda if webhook fails
+                webhook_response = requests.post(webhook_url, json=webhook_data, timeout=10)
+                print(f"Webhook called successfully: {webhook_response.status_code}")
+            except Exception as webhook_error:
+                print(f"Webhook failed: {webhook_error}")
             
         return {
             "statusCode": 200,
@@ -120,6 +175,7 @@ def process_csv(event, context):
         }
         
     except Exception as e:
+        print(f"Error processing CSV: {str(e)}")
         return {
             "statusCode": 500,
             "body": json.dumps({"error": str(e)})
