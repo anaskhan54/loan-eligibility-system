@@ -1,0 +1,449 @@
+{
+  "name": "Loan Product Discovery(Web Crawler)",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Analyze this finance website's HTML content by just calling all the http tools and extract ALL personal loan products with their complete details. Focus on:\n\n1. Product identification (names, variants)\n2. Interest rate ranges (annual percentage rates)\n3. Loan amount limits (minimum and maximum)\n4. Tenure/repayment period options\n5. Detailed eligibility criteria:\n   - Income requirements (monthly/annual)\n   - Credit score ranges\n   - Age limits\n   - Employment type requirements\n   - Required documentation\n6. Processing fees and charges\n7. Any special conditions or additional criteria\n\nEnsure the JSON structure is consistent and enables easy SQL-based filtering for user matching. The output will be used for automated user-loan matching based on income, credit score, age, and employment status.",
+        "options": {
+          "systemMessage": "You are an expert finance website analyzer. You analyze complete HTML content and extract personal loan product information in a strict, standardized JSON structure that enables efficient filtering and matching.\n\nReturn ONLY valid JSON in this exact structure (no markdown formatting, no code blocks):\n\n{\n  \"products\": [\n    {\n      \"product_name\": \"string\",\n      \"interest_rate_min\": number,\n      \"interest_rate_max\": number,\n      \"loan_amount_min\": number,\n      \"loan_amount_max\": number,\n      \"tenure_min_months\": number,\n      \"tenure_max_months\": number,\n      \"eligibility\": {\n        \"min_monthly_income\": number,\n        \"min_credit_score\": number,\n        \"max_credit_score\": number,\n        \"min_age\": number,\n        \"max_age\": number,\n        \"employment_types\": [\"salaried\", \"self_employed\", \"business_owner\"],\n        \"required_documents\": [\"string array\"],\n        \"additional_criteria\": \"string\"\n      },\n      \"processing_fee_percent\": number,\n      \"website_source\": \"string\"\n    }\n  ]\n}\n\nCRITICAL RULES:\n- Return ONLY the JSON object, no markdown code blocks, no ```json``` formatting\n- Use null for unavailable numeric values\n- Use empty arrays [] for unavailable arrays  \n- Use \"not_specified\" for unavailable strings\n- Convert percentage rates to decimal (e.g., 10.5% → 10.5)\n- STANDARDIZE employment types to ONLY these values:\n  * \"salaried\" (for salaried employees, government employees, professionals)\n  * \"self_employed\" (for self-employed individuals, freelancers)\n  * \"business_owner\" (for business owners, entrepreneurs)\n  * \"retired\" (for retired individuals)\n  * \"student\" (for students)\n- Map similar terms: \"government_employees\" → \"salaried\", \"professionals\" → \"salaried\"\n- Extract ALL loan products found on the page\n- Ensure all numeric values are actual numbers, not strings"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -880,
+        -672
+      ],
+      "id": "adf0b730-0d1b-4492-8b88-944230acb737",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "url": "https://www.axisbank.com/retail/loans/personal-loan",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -352,
+        -256
+      ],
+      "id": "cf6ca5a1-d321-4921-8823-53ee278721f5",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the LLM response and prepare for database insertion\nconst inputData = $input.first().json;\nlet responseText = '';\n\n// Handle the new response format where LLM output is in 'output' field\nif (Array.isArray(inputData) && inputData.length > 0) {\n  responseText = inputData[0].output || '';\n} else if (typeof inputData === 'object' && inputData.output) {\n  responseText = inputData.output;\n} else if (typeof inputData === 'string') {\n  responseText = inputData;\n} else if (inputData.text) {\n  responseText = inputData.text;\n} else if (inputData.message) {\n  responseText = inputData.message;\n} else {\n  responseText = JSON.stringify(inputData);\n}\n\n// Clean the response - remove markdown formatting\nresponseText = responseText.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n\n// Parse JSON\nlet parsedData;\ntry {\n  parsedData = JSON.parse(responseText);\n} catch (error) {\n  console.error('JSON parsing error:', error);\n  console.error('Raw response:', responseText);\n  throw new Error(`Failed to parse LLM response as JSON: ${error.message}`);\n}\n\n// MD5 hash function (simple implementation for n8n)\nfunction generateMD5(input) {\n  // Simple MD5-like hash function for n8n environment\n  let hash = 0;\n  const str = input.toString();\n  \n  if (str.length === 0) return hash.toString();\n  \n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash; // Convert to 32-bit integer\n  }\n  \n  // Convert to positive hex string and pad to ensure consistent length\n  const hexHash = Math.abs(hash).toString(16).padStart(8, '0');\n  \n  // Add additional characters from string length and content to make it more unique\n  const lengthHash = str.length.toString(16).padStart(2, '0');\n  const contentHash = str.split('').reduce((acc, char, idx) => {\n    return acc + (char.charCodeAt(0) * (idx + 1)).toString(16).slice(-1);\n  }, '').slice(0, 6);\n  \n  return (hexHash + lengthHash + contentHash).substring(0, 16);\n}\n\n// Alternative: Use crypto if available (better hash)\nfunction generateProductId(productName, websiteSource) {\n  const input = `${productName.toLowerCase().trim()}_${websiteSource.toLowerCase().trim()}`;\n  \n  // Try to use crypto if available (for better hashing)\n  if (typeof crypto !== 'undefined' && crypto.subtle) {\n    // For environments with crypto support\n    const encoder = new TextEncoder();\n    const data = encoder.encode(input);\n    \n    // Fallback to simple hash since crypto.subtle is async\n    return generateMD5(input);\n  } else {\n    // Use our simple hash function\n    return generateMD5(input);\n  }\n}\n\n// Employment type mapping function\nfunction standardizeEmploymentTypes(types) {\n  if (!Array.isArray(types)) return [];\n  \n  const mapping = {\n    'government_employees': 'salaried',\n    'professionals': 'salaried',\n    'salaried_employees': 'salaried',\n    'govt_employees': 'salaried',\n    'private_employees': 'salaried',\n    'freelancers': 'self_employed',\n    'contractors': 'self_employed',\n    'entrepreneurs': 'business_owner',\n    'business_owners': 'business_owner',\n    'proprietors': 'business_owner'\n  };\n  \n  return types.map(type => {\n    const lowerType = type.toLowerCase().replace(/\\s+/g, '_');\n    return mapping[lowerType] || type.toLowerCase();\n  }).filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates\n}\n\n// Updated deduplication logic using product_id\nfunction isDuplicateProduct(productId, existingProductIds) {\n  return existingProductIds.includes(productId);\n}\n\nconst outputItems = [];\nconst processedProducts = [];\nconst seenProductIds = new Set();\n\n// Ensure products array exists\nconst products = parsedData.products || [parsedData];\n\nproducts.forEach((product, index) => {\n  // Validate required fields\n  if (!product.product_name) {\n    console.warn(`Product ${index} missing product_name, skipping`);\n    return;\n  }\n  \n  const eligibility = product.eligibility || {};\n  const websiteSource = product.website_source || 'not_specified';\n  \n  // Generate unique product_id based on product_name and website_source\n  const productId = generateProductId(product.product_name, websiteSource);\n  \n  // Check for duplicates using product_id\n  if (seenProductIds.has(productId)) {\n    console.log(`Skipping duplicate product (ID: ${productId}): ${product.product_name} from ${websiteSource}`);\n    return;\n  }\n  \n  // Add to seen products\n  seenProductIds.add(productId);\n  \n  const processedProduct = {\n    product_id: productId,  // Add the generated product_id\n    product_name: product.product_name,\n    interest_rate_min: product.interest_rate_min || null,\n    interest_rate_max: product.interest_rate_max || null,\n    loan_amount_min: product.loan_amount_min || null,\n    loan_amount_max: product.loan_amount_max || null,\n    tenure_min_months: product.tenure_min_months || null,\n    tenure_max_months: product.tenure_max_months || null,\n    min_monthly_income: eligibility.min_monthly_income || null,\n    min_credit_score: eligibility.min_credit_score || null,\n    max_credit_score: eligibility.max_credit_score || null,\n    min_age: eligibility.min_age || null,\n    max_age: eligibility.max_age || null,\n    employment_types: standardizeEmploymentTypes(eligibility.employment_types || []),\n    required_documents: eligibility.required_documents || [],\n    additional_criteria: eligibility.additional_criteria || 'not_specified',\n    processing_fee_percent: product.processing_fee_percent || null,\n    website_source: websiteSource,\n    crawled_at: new Date().toISOString()\n  };\n  \n  processedProducts.push(processedProduct);\n  outputItems.push({\n    json: processedProduct\n  });\n});\n\nconsole.log(`Processed ${outputItems.length} unique products for database insertion`);\nconsole.log(`Generated product IDs: ${Array.from(seenProductIds).join(', ')}`);\n\nreturn outputItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        -704
+      ],
+      "id": "5dc952ff-cfce-448e-9481-1e66859b0eab",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "url": "https://www.utkarsh.bank/personal/loans/additional-loans/personal-loan",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -640,
+        -256
+      ],
+      "id": "8b811c5b-7eaa-4808-8a9e-9cd7a03b14ab",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "url": "https://www.unionbankofindia.co.in/en/Details/union-women-professional-personal-loan-scheme",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -96,
+        -320
+      ],
+      "id": "928012c6-e537-494e-bb74-bdb17dfc1e58",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        -512
+      ],
+      "id": "9c8a9cba-93b8-42e9-85d9-b1b5e4e3e813",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "J4uoWeKZGeoJvI2M",
+          "name": "Google Gemini(PaLM) Api account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "loan_products",
+          "mode": "list",
+          "cachedResultName": "loan_products"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "product_id": "={{ $json.product_id }}",
+            "product_name": "={{ $json.product_name }}",
+            "interest_rate_min": "={{ $json.interest_rate_min }}",
+            "interest_rate_max": "={{ $json.interest_rate_max }}",
+            "loan_amount_min": "={{ $json.loan_amount_min }}",
+            "loan_amount_max": "={{ $json.loan_amount_max }}",
+            "tenure_min_months": "={{ $json.tenure_min_months }}",
+            "tenure_max_months": "={{ $json.tenure_max_months }}",
+            "min_monthly_income": "={{ $json.min_monthly_income }}",
+            "min_credit_score": "={{ $json.min_credit_score }}",
+            "max_credit_score": "={{ $json.max_credit_score }}",
+            "min_age": "={{ $json.min_age }}",
+            "max_age": "={{ $json.max_age }}",
+            "employment_types": "={{ $json.employment_types }}",
+            "required_documents": "={{ $json.required_documents }}",
+            "additional_criteria": "={{ $json.additional_criteria }}",
+            "processing_fee_percent": "={{ $json.processing_fee_percent }}",
+            "website_source": "={{ $json.website_source }}",
+            "created_at": "={{ $json.crawled_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "product_id",
+              "displayName": "product_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "product_name",
+              "displayName": "product_name",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "interest_rate_min",
+              "displayName": "interest_rate_min",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "interest_rate_max",
+              "displayName": "interest_rate_max",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "loan_amount_min",
+              "displayName": "loan_amount_min",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "loan_amount_max",
+              "displayName": "loan_amount_max",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tenure_min_months",
+              "displayName": "tenure_min_months",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tenure_max_months",
+              "displayName": "tenure_max_months",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "min_monthly_income",
+              "displayName": "min_monthly_income",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "min_credit_score",
+              "displayName": "min_credit_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "max_credit_score",
+              "displayName": "max_credit_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "min_age",
+              "displayName": "min_age",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "max_age",
+              "displayName": "max_age",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "employment_types",
+              "displayName": "employment_types",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "array",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "required_documents",
+              "displayName": "required_documents",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "array",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "additional_criteria",
+              "displayName": "additional_criteria",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "processing_fee_percent",
+              "displayName": "processing_fee_percent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "website_source",
+              "displayName": "website_source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "skipOnConflict": true,
+          "replaceEmptyStrings": true
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -208,
+        -704
+      ],
+      "id": "e56e507f-8ab3-40d8-89f6-83cb516f6e29",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "91LoZmNZ9bW9ymbk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 2
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1232,
+        -672
+      ],
+      "id": "1b1ee51a-1b9a-4b9d-94b9-2dea4e49378f",
+      "name": "Schedule Trigger"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "bc6e67e5-9f7a-464f-9355-e70d7de7e542",
+  "meta": {
+    "templateId": "self-building-ai-agent",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5405efbab9f5e57868de8ced806aae6eabce68424569b4eaf85695fb6678e551"
+  },
+  "id": "G7FVgyLDWbxmaRzI",
+  "tags": []
+}
