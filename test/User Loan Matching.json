@@ -1,0 +1,235 @@
+{
+  "name": "User Loan Matching",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH unprocessed_users AS (\n        SELECT\n            u.user_id,\n            u.email,\n            u.monthly_income,\n            u.credit_score,\n            u.employment_status,\n            u.age\n        FROM users u\n        WHERE u.is_processed = FALSE\n    ),\n    relaxed_matches AS (\n        SELECT\n            u.user_id,\n            u.email,\n            u.monthly_income,\n            u.credit_score,\n            u.employment_status,\n            u.age,\n            lp.product_id,\n            lp.product_name,\n            lp.interest_rate_min,\n            lp.interest_rate_max,\n            lp.loan_amount_min,\n            lp.loan_amount_max,\n            lp.min_monthly_income,\n            lp.min_credit_score,\n            lp.max_credit_score,\n            lp.min_age,\n            lp.max_age,\n            lp.employment_types,\n            lp.website_source,\n            -- Calculate match scores for different criteria\n            CASE\n                WHEN u.monthly_income >= lp.min_monthly_income THEN 'INCOME_PASS'\n                WHEN u.monthly_income >= lp.min_monthly_income * 0.8 THEN 'INCOME_CLOSE'\n                ELSE 'INCOME_FAIL'\n            END as income_status,\n            CASE\n                WHEN u.credit_score >= lp.min_credit_score AND u.credit_score <= lp.max_credit_score THEN 'CREDIT_PASS'\n                WHEN u.credit_score >= lp.min_credit_score * 0.9 THEN 'CREDIT_CLOSE'\n                ELSE 'CREDIT_FAIL'\n            END as credit_status,\n            CASE\n                WHEN u.age >= lp.min_age AND u.age <= lp.max_age THEN 'AGE_PASS'\n                WHEN u.age >= lp.min_age - 2 AND u.age <= lp.max_age + 2 THEN 'AGE_CLOSE'\n                ELSE 'AGE_FAIL'\n            END as age_status,\n            CASE\n                WHEN u.employment_status = ANY(lp.employment_types) THEN 'EMPLOYMENT_PASS'\n                ELSE 'EMPLOYMENT_FAIL'\n            END as employment_status_check\n        FROM unprocessed_users u\n        CROSS JOIN loan_products lp\n        WHERE\n            -- Very relaxed criteria - at least 2 out of 4 must pass or be close\n            (\n                -- Income: Pass or close (80% of required)\n                u.monthly_income >= lp.min_monthly_income * 0.8\n                OR\n                -- Credit: Pass or close (90% of minimum)\n                (u.credit_score >= lp.min_credit_score * 0.9 AND u.credit_score <= lp.max_credit_score * 1.1)\n                OR\n                -- Age: Pass or close (±2 years)\n                (u.age >= lp.min_age - 2 AND u.age <= lp.max_age + 2)\n                OR\n                -- Employment: Exact match required\n                u.employment_status = ANY(lp.employment_types)\n            )\n    ),\n    scored_matches AS (\n        SELECT\n            *,\n            -- Calculate total match score\n            (CASE WHEN income_status = 'INCOME_PASS' THEN 3\n                  WHEN income_status = 'INCOME_CLOSE' THEN 1\n                  ELSE 0 END) +\n            (CASE WHEN credit_status = 'CREDIT_PASS' THEN 3\n                  WHEN credit_status = 'CREDIT_CLOSE' THEN 1\n                  ELSE 0 END) +\n            (CASE WHEN age_status = 'AGE_PASS' THEN 2\n                  WHEN age_status = 'AGE_CLOSE' THEN 1\n                  ELSE 0 END) +\n            (CASE WHEN employment_status_check = 'EMPLOYMENT_PASS' THEN 4\n                  ELSE 0 END) as total_score,\n\n            -- Calculate match percentage\n            ROUND(\n                ((CASE WHEN income_status = 'INCOME_PASS' THEN 3\n                       WHEN income_status = 'INCOME_CLOSE' THEN 1 ELSE 0 END) +\n                 (CASE WHEN credit_status = 'CREDIT_PASS' THEN 3\n                       WHEN credit_status = 'CREDIT_CLOSE' THEN 1 ELSE 0 END) +\n                 (CASE WHEN age_status = 'AGE_PASS' THEN 2\n                       WHEN age_status = 'AGE_CLOSE' THEN 1 ELSE 0 END) +\n                 (CASE WHEN employment_status_check = 'EMPLOYMENT_PASS' THEN 4 ELSE 0 END))::DECIMAL / 12 * 100, 2\n            ) as match_percentage\n        FROM relaxed_matches\n    ),\n    ranked_matches AS (\n        SELECT\n            *,\n            ROW_NUMBER() OVER (\n                PARTITION BY user_id\n                ORDER BY\n                    total_score DESC,\n                    match_percentage DESC,\n                    interest_rate_min ASC\n            ) as match_rank\n        FROM scored_matches\n        WHERE total_score >= 3  -- At least 25% match\n    )\n    SELECT\n        user_id,\n        email,\n        monthly_income,\n        credit_score,\n        employment_status,\n        age,\n        product_id,\n        product_name,\n        interest_rate_min,\n        interest_rate_max,\n        loan_amount_min,\n        loan_amount_max,\n        min_monthly_income,\n        min_credit_score,\n        max_credit_score,\n        min_age,\n        max_age,\n        employment_types,\n        website_source,\n        income_status,\n        credit_status,\n        age_status,\n        employment_status_check,\n        total_score,\n        match_percentage,\n        match_rank\n    FROM ranked_matches\n    WHERE match_rank <= 10  -- Top 10 matches per user\n    ORDER BY\n        user_id ASC,\n        match_rank ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -400,
+        -416
+      ],
+      "id": "c274b88f-19cd-4bd5-b816-56f9bad2f265",
+      "name": "get matches",
+      "credentials": {
+        "postgres": {
+          "id": "91LoZmNZ9bW9ymbk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "user_loan_matches",
+          "mode": "list",
+          "cachedResultName": "user_loan_matches"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.user_id }}",
+            "product_id": "={{ $json.product_id }}",
+            "match_score": "={{ $json.total_score }}",
+            "created_at": "2025-08-03T02:07:18"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "match_id",
+              "displayName": "match_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "product_id",
+              "displayName": "product_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "match_score",
+              "displayName": "match_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "match_reason",
+              "displayName": "match_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "skipOnConflict": true
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -192,
+        -416
+      ],
+      "id": "b644a8fc-6ba9-4c58-b684-e28a6e638a2c",
+      "name": "insert into user_loan_matches_table",
+      "credentials": {
+        "postgres": {
+          "id": "91LoZmNZ9bW9ymbk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update users set is_processed=True where user_id = '{{ $json.user_id }}'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        16,
+        -416
+      ],
+      "id": "b64c1f4f-2731-4c43-9e6b-e9df42c91af1",
+      "name": "update users is_processed",
+      "credentials": {
+        "postgres": {
+          "id": "91LoZmNZ9bW9ymbk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "5d72b45f-4b37-492f-addf-c117d3b3ea3c",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        -448
+      ],
+      "id": "9ff64ed4-1d1f-4388-b99f-87e20bd3bb22",
+      "name": "Webhook",
+      "webhookId": "5d72b45f-4b37-492f-addf-c117d3b3ea3c"
+    },
+    {
+      "parameters": {
+        "url": "http://0.0.0.0:5678/webhook/5ed2dda7-ce4d-4686-91cd-1d6b57537527",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        -416
+      ],
+      "id": "5a58532d-539e-4d7b-af8c-601862441287",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "get matches": {
+      "main": [
+        [
+          {
+            "node": "insert into user_loan_matches_table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "insert into user_loan_matches_table": {
+      "main": [
+        [
+          {
+            "node": "update users is_processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "get matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update users is_processed": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "55664b4f-9081-497d-9e25-fa98cf7bf50d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5405efbab9f5e57868de8ced806aae6eabce68424569b4eaf85695fb6678e551"
+  },
+  "id": "V2zZg0KGW2Y6r2Km",
+  "tags": []
+}
