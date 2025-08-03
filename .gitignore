@@ -1,4 +1,4 @@
 .serverless/
-test/node_modules
-test/.claude
+lambdas/node_modules
+lambdas/.claude
 package-lock.json
