@@ -155,16 +155,11 @@ def process_csv(event, context):
             print(f"Successfully inserted {records_inserted} records to database")
             
             # Call webhook after processing
-            webhook_url = "https://httpbin.org/post"  # Sample webhook - replace with your actual webhook
-            webhook_data = {
-                "message": "CSV processed successfully",
-                "filename": key,
-                "processed_at": "now",
-                "records_processed": records_inserted
-            }
+            webhook_url = "https://f9ff24fe2f88.ngrok-free.app/webhook/5d72b45f-4b37-492f-addf-c117d3b3ea3c"
+           
             
             try:
-                webhook_response = requests.post(webhook_url, json=webhook_data, timeout=10)
+                webhook_response = requests.get(webhook_url)
                 print(f"Webhook called successfully: {webhook_response.status_code}")
             except Exception as webhook_error:
                 print(f"Webhook failed: {webhook_error}")
