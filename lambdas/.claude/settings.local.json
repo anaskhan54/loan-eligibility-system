@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws lambda list-functions:*)",
+      "Bash(sls:*)",
+      "Bash(aws logs delete-log-group:*)",
+      "Bash(aws logs describe-log-groups:*)",
+      "Bash(aws lambda add-permission:*)",
+      "Bash(aws s3api put-bucket-notification-configuration:*)",
+      "Bash(rm:*)",
+      "Bash(aws kms put-key-policy:*)",
+      "Bash(aws logs describe-log-streams:*)",
+      "Bash(aws logs get-log-events:*)"
+    ],
+    "deny": []
+  }
+}

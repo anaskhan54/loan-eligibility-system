@@ -1,0 +1,68 @@
+-- Create users table
+CREATE TABLE users (
+    user_id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    monthly_income DECIMAL(12,2),
+    credit_score INTEGER,
+    employment_status VARCHAR(50),
+    age INTEGER,
+    is_processed BOOLEAN DEFAULT FALSE
+);
+
+-- Create loan_products table with custom product_id
+CREATE TABLE loan_products (
+    product_id VARCHAR(16) PRIMARY KEY,  -- Changed to VARCHAR for custom MD5-based ID
+    product_name VARCHAR(255) NOT NULL,
+    interest_rate_min DECIMAL(5,2),
+    interest_rate_max DECIMAL(5,2),
+    loan_amount_min DECIMAL(12,2),
+    loan_amount_max DECIMAL(12,2),
+    tenure_min_months INTEGER,
+    tenure_max_months INTEGER,
+    
+    -- Eligibility criteria (normalized for fast SQL filtering)
+    min_monthly_income DECIMAL(12,2),
+    min_credit_score INTEGER,
+    max_credit_score INTEGER,
+    min_age INTEGER,
+    max_age INTEGER,
+    employment_types TEXT[], -- PostgreSQL array type
+    required_documents TEXT[],
+    additional_criteria TEXT,
+    
+    processing_fee_percent DECIMAL(5,2),
+    website_source VARCHAR(255)
+);
+
+-- Create matches table for storing user-loan matches
+CREATE TABLE user_loan_matches (
+    match_id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(user_id),
+    product_id VARCHAR(16) REFERENCES loan_products(product_id),  -- Updated reference
+    match_score DECIMAL(5,2), -- For ranking matches
+    match_reason TEXT, -- Why this user matched
+    is_mail_sent BOOLEAN DEFAULT FALSE, -- Track email notification status
+    UNIQUE(user_id, product_id)
+);
+
+-- Indexes for optimization treasure hunt (fast filtering)
+CREATE INDEX idx_loan_products_income ON loan_products(min_monthly_income);
+CREATE INDEX idx_loan_products_credit ON loan_products(min_credit_score, max_credit_score);
+CREATE INDEX idx_loan_products_age ON loan_products(min_age, max_age);
+CREATE INDEX idx_loan_products_employment ON loan_products USING GIN(employment_types);
+CREATE INDEX idx_loan_products_website ON loan_products(website_source);
+
+CREATE INDEX idx_users_income ON users(monthly_income);
+CREATE INDEX idx_users_credit ON users(credit_score);
+CREATE INDEX idx_users_age ON users(age);
+CREATE INDEX idx_users_employment ON users(employment_status);
+CREATE INDEX idx_users_processed ON users(is_processed);
+
+-- Email notification index
+CREATE INDEX idx_user_loan_matches_mail_sent ON user_loan_matches(is_mail_sent);
+
+-- Composite indexes for multi-criteria filtering
+CREATE INDEX idx_loan_products_composite ON loan_products(min_monthly_income, min_credit_score, min_age);
+CREATE INDEX idx_users_composite ON users(monthly_income, credit_score, age, employment_status);
+CREATE INDEX idx_users_unprocessed ON users(is_processed, monthly_income, credit_score, age);
+CREATE INDEX idx_matches_unsent_email ON user_loan_matches(is_mail_sent, user_id, product_id);
