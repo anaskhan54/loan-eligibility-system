@@ -1,0 +1,211 @@
+{
+  "name": "User Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "5ed2dda7-ce4d-4686-91cd-1d6b57537527",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        -128
+      ],
+      "id": "cc35e34f-5197-403e-bf88-78d5293f6db5",
+      "name": "Webhook",
+      "webhookId": "5ed2dda7-ce4d-4686-91cd-1d6b57537527"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "  SELECT\n      u.user_id,\n      u.email AS user_email,\n      u.monthly_income,\n      u.credit_score,\n      u.employment_status,\n      u.age,\n      COUNT(ulm.match_id) as total_matches,\n      STRING_AGG(\n          lp.product_name || ' (' || lp.interest_rate_min || '%-' || lp.interest_rate_max || '%)',\n          ', ' ORDER BY ulm.match_score DESC\n      ) as matched_products,\n      STRING_AGG(\n          lp.website_source,\n          ', ' ORDER BY ulm.match_score DESC\n      ) as website_sources,\n      MAX(ulm.match_score) as best_match_score,\n      -- Get details of the best match\n      (SELECT lp2.product_name\n       FROM user_loan_matches ulm2\n       JOIN loan_products lp2 ON ulm2.product_id = lp2.product_id\n       WHERE ulm2.user_id = u.user_id AND ulm2.is_mail_sent = FALSE\n       ORDER BY ulm2.match_score DESC LIMIT 1) as best_product_name,\n      (SELECT lp2.website_source\n       FROM user_loan_matches ulm2\n       JOIN loan_products lp2 ON ulm2.product_id = lp2.product_id\n       WHERE ulm2.user_id = u.user_id AND ulm2.is_mail_sent = FALSE\n       ORDER BY ulm2.match_score DESC LIMIT 1) as best_website_source\n  FROM users u\n  INNER JOIN user_loan_matches ulm ON u.user_id = ulm.user_id\n  INNER JOIN loan_products lp ON ulm.product_id = lp.product_id\n  WHERE ulm.is_mail_sent = FALSE\n  GROUP BY u.user_id, u.email, u.monthly_income, u.credit_score, u.employment_status, u.age\n  ORDER BY MAX(ulm.match_score) DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -192,
+        32
+      ],
+      "id": "7206a39e-31b1-416f-9d92-63c66672bad2",
+      "name": "get users to send email to",
+      "credentials": {
+        "postgres": {
+          "id": "91LoZmNZ9bW9ymbk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "user_loan_matches",
+          "mode": "list",
+          "cachedResultName": "user_loan_matches"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_mail_sent": true,
+            "user_id": "={{ $json.user_id }}"
+          },
+          "matchingColumns": [
+            "user_id"
+          ],
+          "schema": [
+            {
+              "id": "match_id",
+              "displayName": "match_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "product_id",
+              "displayName": "product_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "match_score",
+              "displayName": "match_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "is_mail_sent",
+              "displayName": "is_mail_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -16,
+        -176
+      ],
+      "id": "77ab6962-cbc5-4e29-b178-1ebc35786778",
+      "name": "update users to mail sent to true",
+      "credentials": {
+        "postgres": {
+          "id": "91LoZmNZ9bW9ymbk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "subject": "=🎉 {{$json.total_matches}} Loan Matches Found - Pre-Approved Offers Inside!",
+        "body": "=  🎉 Great News! We Found {{$json.total_matches}} Loan Matches For You\n\n  Hi there!\n\n  Based on your profile, you're pre-qualified for {{$json.total_matches}} exclusive loan offers.\n\n  YOUR PROFILE:\n  - Monthly Income: ${{$json.monthly_income}}\n  - Credit Score: {{$json.credit_score}}\n  - Employment: {{$json.employment_status}}\n  - Age: {{$json.age}} years\n\n  🏆 YOUR BEST MATCH ({{$json.best_match_score}}% compatibility):\n  {{$json.best_product_name}}\n\n  Apply here: {{$json.best_website_source}}\n\n  📋 ALL YOUR MATCHED PRODUCTS:\n  {{$json.matched_products}}\n\n  🌐 LENDER WEBSITES:\n  {{$json.website_sources}}\n\n  ⚡ WHY APPLY TODAY:\n  ✅ Pre-qualified - Higher approval chances\n  ✅ Competitive rates - Best market offers\n  ✅ Quick processing - 24-48 hour approval\n  ✅ No credit impact - Soft check only\n\n  🚀 Ready to get your loan? Start here: {{$json.best_website_source}}\n\n  💡 PRO TIPS:\n  - Have income documents ready\n  - Check your credit report first\n  - Compare all rates and terms\n  - Read the fine print carefully",
+        "fromEmail": "admin@xdevs.tech",
+        "toAddresses": [
+          "={{ $json.user_email }}"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsSes",
+      "typeVersion": 1,
+      "position": [
+        16,
+        64
+      ],
+      "id": "fe4c6416-4431-45ca-b3aa-12aeec2b8d17",
+      "name": "Send an email",
+      "credentials": {
+        "aws": {
+          "id": "gplIHpKDzZD3hQ8K",
+          "name": "AWS account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "get users to send email to",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get users to send email to": {
+      "main": [
+        [
+          {
+            "node": "update users to mail sent to true",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send an email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "51ddbf65-59df-48f2-b79b-a63733a5c78e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5405efbab9f5e57868de8ced806aae6eabce68424569b4eaf85695fb6678e551"
+  },
+  "id": "UzFkeErAzBvcyNkI",
+  "tags": []
+}
