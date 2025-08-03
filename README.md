@@ -32,8 +32,9 @@ loan-eligibility-engine/
 │   ├── schema.sql                 # Database schema
 │   └── index.html                 # Frontend upload interface
 └── n8n-workflows/                 # n8n workflow configurations
-    ├── loan-matching-workflow.json
-    └── email-notification-workflow.json
+    ├── Loan Product Discovery(Web Crawler).json
+    ├── User Loan Matching.json
+    └── User Notification.json
 ```
 
 ## 🛠️ Technology Stack
@@ -194,16 +195,16 @@ webhook_url = "http://your-n8n-instance:5678/webhook/loan-matching"
 
 ### 4. Import n8n Workflows
 
-#### Loan Matching Workflow
+#### User Loan Matching Workflow
 1. In n8n, go to **Workflows** → **Import from URL/File**
-2. Import `n8n-workflows/loan-matching-workflow.json`
+2. Import `n8n-workflows/User Loan Matching.json`
 3. Configure nodes:
    - **Webhook Trigger**: Set to your webhook URL
    - **PostgreSQL nodes**: Select your database credential
    - **Function nodes**: Review and customize matching logic
 
-#### Email Notification Workflow
-1. Import `n8n-workflows/email-notification-workflow.json`
+#### User Notification Workflow
+1. Import `n8n-workflows/User Notification.json`
 2. Configure:
    - **PostgreSQL nodes**: Database credentials
    - **AWS SES node**: AWS credentials
