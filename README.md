@@ -1,4 +1,4 @@
-# 🚀 Loan Eligibility Engine - SDE Intern Backend Assignment
+# 🚀 Loan Eligibility Engine
 
 ## 📋 Overview
 
